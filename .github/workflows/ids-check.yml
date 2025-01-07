@@ -1,0 +1,73 @@
+name: ids-check
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: ids-check
+            os: ubuntu-24.04
+
+    steps:
+
+    - uses: actions/checkout@v4
+      	path: ${{ github.workspace }}/llvm-project
+       	fetch-depth: 0
+
+    - uses: actions/checkout@v4
+      with:
+        repository: compnerd/ids
+        path: ${{ github.workspace }}/ids
+	fetch-depth: 0
+
+    - name: Configure LLVM
+      run: >
+      	cmake -B ${{ github.workspace }}/llvm-project/build/	\
+	      -D CMAKE_BUILD_TYPE=Release			\
+	      --S ${{ github.workspace }}/llvm-project/llvm/	\
+	      -DLLVM_ENABLE_PROJECTS=clang			\
+	      -DLLVM_TARGETS_TO_BUILD="host"
+
+    - name: Build LLVM
+      run: >
+        cmake --build ${{ github.workspace }}/llvm-project/build/	\
+	      --config Release						\
+	      --parallel $(nproc --all)
+
+    - name: Configure ids
+      run: |
+        cmake -B ${{ github.workspace }}/ids/build/						 \
+	      -S ${{ github.workspace }}/ids/						   	 \
+              -D CMAKE_BUILD_TYPE=Release					 	    	 \
+              -D CMAKE_C_COMPILER=${{ github.workspace }}/llvm-project/build/bin/clang 	    	 \
+              -D CMAKE_CXX_COMPILER=${{ github.workspace }}/llvm-project/build//bin/clang++ 	 \
+              -D CMAKE_EXE_LINKER_FLAGS=-fuse-ld=lld                            	    	 \
+              -D LLVM_DIR=${{ github.workspace }}/llvm-project/build/lib/cmake/llvm    	    	 \
+              -D Clang_DIR=${{ github.workspace }}/llvm-project/build//lib/cmake/clang      	 \
+              -D FILECHECK_EXECUTABLE=${{ github.workspace }}/llvm-project/build/bin/FileCheck   \
+              -D LIT_EXECUTABLE=${{ github.workspace }}/llvm-project/build/bin/llvm-lit
+
+    - name: Build ids
+      run: >
+        cmake --build ${{ github.workspace }}/ids/build                             \
+              --config Relaase		   					    \
+	      --parallel $(nproc --all)
+
+    - name: Test ids
+      run: >
+        cmake --build ${{ github.workspace }}/ids/build                             \
+	      --target check-ids						    \
+              --config Release							    \
+	      --parallel $(nproc --all)
